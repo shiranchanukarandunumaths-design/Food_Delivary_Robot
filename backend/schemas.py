@@ -1,23 +1,33 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 class Waypoint(BaseModel):
     lat: float
     lng: float
 
-# --- USER SCHEMAS ---
-class UserLogin(BaseModel):
-    username: str
-
-class UserCreate(BaseModel):
-    username: str
+# --- USER AUTH SCHEMAS ---
+class UserRegister(BaseModel):
+    email: str
+    password: str
     full_name: str
-    role: str = "student"
+    student_id: Optional[str] = None
     phone: Optional[str] = None
+    department: Optional[str] = None
 
-class UserOut(UserCreate):
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class UserOut(BaseModel):
     id: int
+    email: str
+    full_name: str
+    student_id: Optional[str] = None
+    phone: Optional[str] = None
+    department: Optional[str] = None
+    role: str
+    created_at: datetime
     class Config:
         from_attributes = True
 
@@ -37,16 +47,19 @@ class NodeOut(NodeBase):
     class Config:
         from_attributes = True
 
-# --- EDGE / ROUTE SCHEMAS ---
+# --- EDGE / ROAD SCHEMAS ---
 class EdgeBase(BaseModel):
     from_node_id: int
     to_node_id: int
     name: Optional[str] = None
-    distance_m: float
+    distance_m: Optional[float] = None
     waypoints: Optional[List[Waypoint]] = None
 
-class EdgeCreate(EdgeBase):
-    pass
+class EdgeCreate(BaseModel):
+    name: Optional[str] = None
+    from_node_id: int
+    to_node_id: int
+    waypoints: List[Waypoint]
 
 class EdgeOut(BaseModel):
     id: int
@@ -61,6 +74,7 @@ class EdgeOut(BaseModel):
 # --- ORDER SCHEMAS ---
 class OrderCreate(BaseModel):
     user_name: str = "Student"
+    user_email: Optional[str] = None
     user_phone: Optional[str] = None
     pickup_node_id: int
     dest_node_id: int
@@ -71,6 +85,7 @@ class OrderOut(BaseModel):
     id: int
     order_code: str
     user_name: str
+    user_email: Optional[str] = None
     user_phone: Optional[str] = None
     pickup_node_id: int
     dest_node_id: int
@@ -80,11 +95,18 @@ class OrderOut(BaseModel):
     status: str
     situation_msg: Optional[str] = None
     progress_percent: float = 0.0
+    qr_unlock_code: Optional[str] = None
+    pin_code: Optional[str] = None
+    container_locked: bool = True
     waypoints: Optional[List[Waypoint]] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
     class Config:
         from_attributes = True
+
+class QRUnlockRequest(BaseModel):
+    order_id: int
+    unlock_code: str # QR token or 6-digit PIN
 
 # --- TELEMETRY SCHEMAS ---
 class TelemetryCreate(BaseModel):
@@ -98,6 +120,7 @@ class TelemetryCreate(BaseModel):
     load_g: int = 0
     state: str = "IDLE"
     situation_msg: Optional[str] = "Standby"
+    container_locked: bool = True
 
 class TelemetryOut(TelemetryCreate):
     id: int

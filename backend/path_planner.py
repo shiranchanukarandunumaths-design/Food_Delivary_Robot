@@ -1,9 +1,29 @@
 import json
+import math
 import heapq
 from typing import List, Dict, Tuple, Optional
 from sqlalchemy.orm import Session
 from models import NodeModel, EdgeModel
 from schemas import Waypoint
+
+def haversine_dist(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371000.0  # Earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def compute_polyline_distance(waypoints: List[dict]) -> float:
+    if not waypoints or len(waypoints) < 2:
+        return 0.0
+    dist = 0.0
+    for i in range(len(waypoints) - 1):
+        dist += haversine_dist(waypoints[i]["lat"], waypoints[i]["lng"], waypoints[i+1]["lat"], waypoints[i+1]["lng"])
+    return dist
 
 def build_graph(db: Session) -> Dict[int, List[Tuple[int, float, List[dict]]]]:
     """
@@ -17,16 +37,17 @@ def build_graph(db: Session) -> Dict[int, List[Tuple[int, float, List[dict]]]]:
     for edge in edges:
         waypoints = json.loads(edge.waypoints_json) if edge.waypoints_json else []
         reversed_waypoints = list(reversed(waypoints))
+        dist = edge.distance_m if (edge.distance_m and edge.distance_m > 0) else compute_polyline_distance(waypoints)
 
         # from -> to
         if edge.from_node_id not in graph:
             graph[edge.from_node_id] = []
-        graph[edge.from_node_id].append((edge.to_node_id, edge.distance_m, waypoints))
+        graph[edge.from_node_id].append((edge.to_node_id, dist, waypoints))
 
         # to -> from (bidirectional)
         if edge.to_node_id not in graph:
             graph[edge.to_node_id] = []
-        graph[edge.to_node_id].append((edge.from_node_id, edge.distance_m, reversed_waypoints))
+        graph[edge.to_node_id].append((edge.from_node_id, dist, reversed_waypoints))
 
     return graph
 

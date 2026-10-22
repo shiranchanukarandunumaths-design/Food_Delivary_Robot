@@ -1,5 +1,6 @@
 import json
 import uuid
+import random
 import asyncio
 from typing import List, Optional, Set
 from datetime import datetime
@@ -13,17 +14,16 @@ from models import NodeModel, EdgeModel, OrderModel, RobotTelemetryModel, UserMo
 from schemas import (
     NodeCreate, NodeOut, EdgeCreate, EdgeOut, 
     OrderCreate, OrderOut, TelemetryCreate, TelemetryOut, 
-    Waypoint, UserLogin, UserCreate, UserOut
+    Waypoint, UserLogin, UserRegister, UserOut, QRUnlockRequest
 )
-from path_planner import find_shortest_path
+from path_planner import find_shortest_path, compute_polyline_distance
 
-# Ensure tables exist
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Campus Autonomous Food & Parcel Delivery Robot API",
+    title="Campus Autonomous Food & Parcel Delivery Rover API",
     description="Backend for University of Colombo Campus Autonomous Rover (PH 3042)",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 # CORS
@@ -35,7 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- WEBSOCKET CONNECTION MANAGER FOR REAL-TIME TRACKING ---
+# --- WEBSOCKET CONNECTION MANAGER FOR REAL-TIME STREAMING ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -59,37 +59,6 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
-# --- OPTIONAL MQTT CLIENT BRIDGE (Mosquitto) ---
-mqtt_client = None
-try:
-    import paho.mqtt.client as mqtt
-    def on_mqtt_connect(client, userdata, flags, rc):
-        if rc == 0:
-            print("[MQTT] Connected to Mosquitto broker on localhost:1883")
-            client.subscribe("robot/+/status")
-            client.subscribe("robot/+/alerts")
-        else:
-            print(f"[MQTT] Connection returned code {rc}")
-
-    def on_mqtt_message(client, userdata, msg):
-        try:
-            payload = json.loads(msg.payload.decode())
-            # Forward MQTT status to WebSocket clients
-            asyncio.run(ws_manager.broadcast({"type": "mqtt_relay", "topic": msg.topic, "data": payload}))
-        except Exception:
-            pass
-
-    mqtt_client = mqtt.Client(client_id="fastapi_backend")
-    mqtt_client.on_connect = on_mqtt_connect
-    mqtt_client.on_message = on_mqtt_message
-    try:
-        mqtt_client.connect_async("localhost", 1883, 60)
-        mqtt_client.loop_start()
-    except Exception as e:
-        print(f"[MQTT] Mosquitto broker not running locally ({e}). Using WebSocket/HTTP mode.")
-except Exception as e:
-    print(f"[MQTT] Paho-MQTT not initialized: {e}")
-
 @app.get("/")
 def root():
     return {
@@ -99,28 +68,49 @@ def root():
         "ws_url": "/ws/telemetry"
     }
 
-# --- AUTHENTICATION & USERS ---
+# ==========================================
+# 1. USER AUTHENTICATION & ACCOUNTS
+# ==========================================
+
+@app.post("/api/auth/register", response_model=UserOut)
+def register_user(payload: UserRegister, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    existing = db.query(UserModel).filter(UserModel.email == email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Account with this email already exists")
+
+    new_user = UserModel(
+        email=email,
+        password=payload.password, # For local demo
+        full_name=payload.full_name,
+        student_id=payload.student_id,
+        phone=payload.phone,
+        department=payload.department,
+        role="student"
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
 
 @app.post("/api/auth/login", response_model=UserOut)
 def login_user(payload: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(UserModel).filter(UserModel.username == payload.username.strip().lower()).first()
-    if not user:
-        # Create a new student user on the fly if not exists
-        user = UserModel(
-            username=payload.username.strip().lower(),
-            full_name=payload.username.capitalize(),
-            role="student"
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    email = payload.email.strip().lower()
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    if not user or user.password != payload.password:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     return user
 
-@app.get("/api/users", response_model=List[UserOut])
-def get_users(db: Session = Depends(get_db)):
-    return db.query(UserModel).all()
+@app.get("/api/auth/profile", response_model=UserOut)
+def get_user_profile(email: str = Query(...), db: Session = Depends(get_db)):
+    user = db.query(UserModel).filter(UserModel.email == email.strip().lower()).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
-# --- CAMPUS NODES & PLACES ---
+# ==========================================
+# 2. CAMPUS NODES / LANDMARKS (ADMIN & USERS)
+# ==========================================
 
 @app.get("/api/nodes", response_model=List[NodeOut])
 def get_all_nodes(db: Session = Depends(get_db)):
@@ -130,7 +120,8 @@ def get_all_nodes(db: Session = Depends(get_db)):
 def create_node(node: NodeCreate, db: Session = Depends(get_db)):
     existing = db.query(NodeModel).filter(NodeModel.code == node.code).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Node code already exists")
+        node.code = f"{node.code}_{uuid.uuid4().hex[:4].upper()}"
+
     new_node = NodeModel(
         code=node.code,
         name=node.name,
@@ -143,7 +134,20 @@ def create_node(node: NodeCreate, db: Session = Depends(get_db)):
     db.refresh(new_node)
     return new_node
 
-# --- CAMPUS EDGES / ROUTES ---
+@app.delete("/api/nodes/{node_id}")
+def delete_node(node_id: int, db: Session = Depends(get_db)):
+    node = db.query(NodeModel).filter(NodeModel.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    # Delete connected edges
+    db.query(EdgeModel).filter((EdgeModel.from_node_id == node_id) | (EdgeModel.to_node_id == node_id)).delete()
+    db.delete(node)
+    db.commit()
+    return {"status": "success", "deleted_node_id": node_id}
+
+# ==========================================
+# 3. ADMIN ROAD & PATH TRAINING
+# ==========================================
 
 @app.get("/api/edges", response_model=List[EdgeOut])
 def get_all_edges(db: Session = Depends(get_db)):
@@ -161,47 +165,70 @@ def get_all_edges(db: Session = Depends(get_db)):
         ))
     return results
 
-@app.post("/api/edges", response_model=EdgeOut)
-def create_or_save_edge(edge: EdgeCreate, db: Session = Depends(get_db)):
-    pts_json = json.dumps([w.dict() for w in edge.waypoints]) if edge.waypoints else "[]"
+@app.post("/api/admin/roads", response_model=EdgeOut)
+async def train_and_save_road(road: EdgeCreate, db: Session = Depends(get_db)):
+    from_node = db.query(NodeModel).filter(NodeModel.id == road.from_node_id).first()
+    to_node = db.query(NodeModel).filter(NodeModel.id == road.to_node_id).first()
+    if not from_node or not to_node:
+        raise HTTPException(status_code=400, detail="Start or End node does not exist")
+
+    pts_dicts = [w.dict() for w in road.waypoints]
+    # Ensure start and end node coordinates are included
+    if not pts_dicts or (pts_dicts[0]["lat"] != from_node.lat or pts_dicts[0]["lng"] != from_node.lng):
+        pts_dicts.insert(0, {"lat": from_node.lat, "lng": from_node.lng})
+    if pts_dicts[-1]["lat"] != to_node.lat or pts_dicts[-1]["lng"] != to_node.lng:
+        pts_dicts.append({"lat": to_node.lat, "lng": to_node.lng})
+
+    # Compute real road distance along waypoints
+    real_dist = compute_polyline_distance(pts_dicts)
+    road_name = road.name or f"{from_node.name} to {to_node.name}"
+
     new_edge = EdgeModel(
-        from_node_id=edge.from_node_id,
-        to_node_id=edge.to_node_id,
-        name=edge.name,
-        distance_m=edge.distance_m,
-        waypoints_json=pts_json
+        from_node_id=road.from_node_id,
+        to_node_id=road.to_node_id,
+        name=road_name,
+        distance_m=round(real_dist, 2),
+        waypoints_json=json.dumps(pts_dicts)
     )
     db.add(new_edge)
     db.commit()
     db.refresh(new_edge)
+
+    # Broadcast updated map network to all connected clients
+    await ws_manager.broadcast({
+        "type": "road_network_updated",
+        "new_road_id": new_edge.id,
+        "name": road_name,
+        "distance_m": new_edge.distance_m
+    })
+
     return EdgeOut(
         id=new_edge.id,
         from_node_id=new_edge.from_node_id,
         to_node_id=new_edge.to_node_id,
         name=new_edge.name,
         distance_m=new_edge.distance_m,
-        waypoints=edge.waypoints
+        waypoints=[Waypoint(**p) for p in pts_dicts]
     )
 
-@app.get("/api/routes/plan")
-def plan_route(
-    start_id: int = Query(..., description="Start / Pickup node ID"),
-    target_id: int = Query(..., description="Destination node ID"),
-    db: Session = Depends(get_db)
-):
-    node_ids, waypoints, total_dist = find_shortest_path(db, start_id, target_id)
-    if not node_ids:
-        raise HTTPException(status_code=404, detail="No path found between specified nodes")
-    return {
-        "start_node_id": start_id,
-        "target_node_id": target_id,
-        "total_distance_m": round(total_dist, 2),
-        "node_sequence": node_ids,
-        "waypoint_count": len(waypoints),
-        "waypoints": [w.dict() for w in waypoints]
-    }
+@app.delete("/api/admin/roads/{road_id}")
+def delete_road(road_id: int, db: Session = Depends(get_db)):
+    edge = db.query(EdgeModel).filter(EdgeModel.id == road_id).first()
+    if not edge:
+        raise HTTPException(status_code=404, detail="Road segment not found")
+    db.delete(edge)
+    db.commit()
+    return {"status": "success", "deleted_road_id": road_id}
 
-# --- ORDERS & PRIORITIZATION QUEUE ---
+@app.post("/api/admin/clear-all-roads")
+def clear_all_roads(db: Session = Depends(get_db)):
+    db.query(EdgeModel).delete()
+    db.commit()
+    return {"status": "success", "message": "All road segments cleared. Ready for fresh route training."}
+
+# ==========================================
+# 4. ORDER CREATION, ROUTE PLANNING & QR UNLOCK
+# ==========================================
 
 @app.post("/api/orders", response_model=OrderOut)
 async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db)):
@@ -209,21 +236,33 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
     dest = db.query(NodeModel).filter(NodeModel.id == order.dest_node_id).first()
 
     if not pickup or not dest:
-        raise HTTPException(status_code=400, detail="Invalid pickup or destination node ID")
+        raise HTTPException(status_code=400, detail="Invalid pickup or destination place")
 
-    # Priority calculation: Emergency orders get priority 1, regular get priority 5
+    # Priority level
     priority_level = 1 if order.is_emergency else 5
 
-    # Compute optimal waypoint route with Dijkstra
+    # Compute path using trained roads in database
     node_ids, waypoints, total_dist = find_shortest_path(db, order.pickup_node_id, order.dest_node_id)
-    pts_json = json.dumps([w.dict() for w in waypoints]) if waypoints else "[]"
+    if not waypoints:
+        # Fallback straight-line if no connected trained roads exist yet between these nodes
+        waypoints = [Waypoint(lat=pickup.lat, lng=pickup.lng), Waypoint(lat=dest.lat, lng=dest.lng)]
+        total_dist = compute_polyline_distance([w.dict() for w in waypoints])
 
-    order_code = f"ORD-{'EMG-' if order.is_emergency else ''}{uuid.uuid4().hex[:6].upper()}"
-    situation = f"Order placed for {order.item_type}. {'🚨 EMERGENCY RUSH' if order.is_emergency else 'Standard delivery'}. Waiting for collection at {pickup.name}."
+    pts_json = json.dumps([w.dict() for w in waypoints])
+
+    order_suffix = uuid.uuid4().hex[:6].upper()
+    order_code = f"ORD-{'EMG-' if order.is_emergency else ''}{order_suffix}"
+    
+    # Generate unique QR unlock code and 6-digit PIN
+    qr_unlock = f"UOC-ROVER-UNLOCK-{order_suffix}-{uuid.uuid4().hex[:4].upper()}"
+    pin_code = str(random.randint(100000, 999999))
+
+    situation = f"Order created for {order.item_type}. {'🚨 EMERGENCY RUSH' if order.is_emergency else 'Standard'}. Waiting for pickup at {pickup.name}."
 
     new_order = OrderModel(
         order_code=order_code,
         user_name=order.user_name,
+        user_email=order.user_email,
         user_phone=order.user_phone,
         pickup_node_id=order.pickup_node_id,
         dest_node_id=order.dest_node_id,
@@ -234,28 +273,14 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
         situation_msg=situation,
         progress_percent=0.0,
         waypoints_json=pts_json,
+        qr_unlock_code=qr_unlock,
+        pin_code=pin_code,
+        container_locked=True,
         created_at=datetime.utcnow()
     )
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
-
-    # Publish to MQTT if available
-    if mqtt_client and mqtt_client.is_connected():
-        try:
-            cmd_payload = {
-                "action": "new_order",
-                "order_id": new_order.id,
-                "order_code": new_order.order_code,
-                "priority": priority_level,
-                "pickup": pickup.name,
-                "destination": dest.name,
-                "item_type": new_order.item_type,
-                "waypoints": [w.dict() for w in waypoints]
-            }
-            mqtt_client.publish("robot/1/command", json.dumps(cmd_payload), qos=1)
-        except Exception as e:
-            print(f"[MQTT] Publish failed: {e}")
 
     # Broadcast new order to WebSocket
     await ws_manager.broadcast({
@@ -264,6 +289,8 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
         "order_code": new_order.order_code,
         "is_emergency": new_order.is_emergency,
         "item_type": new_order.item_type,
+        "qr_unlock_code": new_order.qr_unlock_code,
+        "pin_code": new_order.pin_code,
         "situation_msg": new_order.situation_msg
     })
 
@@ -271,6 +298,7 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
         id=new_order.id,
         order_code=new_order.order_code,
         user_name=new_order.user_name,
+        user_email=new_order.user_email,
         user_phone=new_order.user_phone,
         pickup_node_id=new_order.pickup_node_id,
         dest_node_id=new_order.dest_node_id,
@@ -280,6 +308,9 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
         status=new_order.status,
         situation_msg=new_order.situation_msg,
         progress_percent=new_order.progress_percent,
+        qr_unlock_code=new_order.qr_unlock_code,
+        pin_code=new_order.pin_code,
+        container_locked=new_order.container_locked,
         waypoints=waypoints,
         created_at=new_order.created_at,
         completed_at=new_order.completed_at
@@ -287,7 +318,6 @@ async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db
 
 @app.get("/api/orders", response_model=List[OrderOut])
 def list_orders(limit: int = 50, db: Session = Depends(get_db)):
-    # Sorted by Priority ascending (1=Emergency first), then created_at ascending
     orders = db.query(OrderModel)\
                .order_by(asc(OrderModel.priority), asc(OrderModel.created_at))\
                .limit(limit)\
@@ -299,6 +329,7 @@ def list_orders(limit: int = 50, db: Session = Depends(get_db)):
             id=o.id,
             order_code=o.order_code,
             user_name=o.user_name,
+            user_email=o.user_email,
             user_phone=o.user_phone,
             pickup_node_id=o.pickup_node_id,
             dest_node_id=o.dest_node_id,
@@ -308,6 +339,9 @@ def list_orders(limit: int = 50, db: Session = Depends(get_db)):
             status=o.status,
             situation_msg=o.situation_msg,
             progress_percent=o.progress_percent,
+            qr_unlock_code=o.qr_unlock_code,
+            pin_code=o.pin_code,
+            container_locked=o.container_locked,
             waypoints=pts,
             created_at=o.created_at,
             completed_at=o.completed_at
@@ -316,17 +350,23 @@ def list_orders(limit: int = 50, db: Session = Depends(get_db)):
 
 @app.get("/api/orders/active", response_model=Optional[OrderOut])
 def get_active_or_next_order(db: Session = Depends(get_db)):
-    # 1. First check if any order is currently IN_PROGRESS (COLLECTING, DISPATCHED, EN_ROUTE, ARRIVED)
     active = db.query(OrderModel)\
-               .filter(OrderModel.status.in_(["COLLECTING", "DISPATCHED", "EN_ROUTE", "ARRIVED"]))\
+               .filter(OrderModel.status.in_(["COLLECTING", "DISPATCHED", "EN_ROUTE", "ARRIVED", "UNLOCKED"]))\
                .order_by(asc(OrderModel.priority), asc(OrderModel.created_at))\
                .first()
+    if not active:
+        active = db.query(OrderModel)\
+                   .filter(OrderModel.status == "PENDING")\
+                   .order_by(asc(OrderModel.priority), asc(OrderModel.created_at))\
+                   .first()
+
     if active:
         pts = [Waypoint(**p) for p in json.loads(active.waypoints_json)] if active.waypoints_json else []
         return OrderOut(
             id=active.id,
             order_code=active.order_code,
             user_name=active.user_name,
+            user_email=active.user_email,
             user_phone=active.user_phone,
             pickup_node_id=active.pickup_node_id,
             dest_node_id=active.dest_node_id,
@@ -336,37 +376,46 @@ def get_active_or_next_order(db: Session = Depends(get_db)):
             status=active.status,
             situation_msg=active.situation_msg,
             progress_percent=active.progress_percent,
+            qr_unlock_code=active.qr_unlock_code,
+            pin_code=active.pin_code,
+            container_locked=active.container_locked,
             waypoints=pts,
             created_at=active.created_at,
             completed_at=active.completed_at
         )
-
-    # 2. Next check highest priority PENDING order
-    pending = db.query(OrderModel)\
-                .filter(OrderModel.status == "PENDING")\
-                .order_by(asc(OrderModel.priority), asc(OrderModel.created_at))\
-                .first()
-    if pending:
-        pts = [Waypoint(**p) for p in json.loads(pending.waypoints_json)] if pending.waypoints_json else []
-        return OrderOut(
-            id=pending.id,
-            order_code=pending.order_code,
-            user_name=pending.user_name,
-            user_phone=pending.user_phone,
-            pickup_node_id=pending.pickup_node_id,
-            dest_node_id=pending.dest_node_id,
-            item_type=pending.item_type,
-            is_emergency=pending.is_emergency,
-            priority=pending.priority,
-            status=pending.status,
-            situation_msg=pending.situation_msg,
-            progress_percent=pending.progress_percent,
-            waypoints=pts,
-            created_at=pending.created_at,
-            completed_at=pending.completed_at
-        )
-
     return None
+
+# --- SECURE QR CONTAINER UNLOCK ENDPOINT ---
+@app.post("/api/orders/unlock")
+async def unlock_container(req: QRUnlockRequest, db: Session = Depends(get_db)):
+    order = db.query(OrderModel).filter(OrderModel.id == req.order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    token = req.unlock_code.strip()
+    if token != order.qr_unlock_code and token != order.pin_code:
+        raise HTTPException(status_code=400, detail="Invalid QR Code or PIN. Container remains locked!")
+
+    # Matched! Open cargo hatch
+    order.container_locked = False
+    order.status = "UNLOCKED"
+    order.situation_msg = "🔓 QR MATCHED! Rover container unlocked. Please collect your cargo."
+    db.commit()
+
+    # Broadcast unlock to WebSocket clients and robot display
+    await ws_manager.broadcast({
+        "type": "container_unlocked",
+        "order_id": order.id,
+        "order_code": order.order_code,
+        "situation_msg": order.situation_msg
+    })
+
+    return {
+        "status": "success",
+        "order_id": order.id,
+        "container_locked": False,
+        "message": "QR matched! Container unlocked successfully."
+    }
 
 @app.patch("/api/orders/{order_id}/status")
 async def update_order_status(
@@ -374,6 +423,7 @@ async def update_order_status(
     status: str = Query(...), 
     situation_msg: Optional[str] = Query(None),
     progress_percent: Optional[float] = Query(None),
+    container_locked: Optional[bool] = Query(None),
     db: Session = Depends(get_db)
 ):
     order = db.query(OrderModel).filter(OrderModel.id == order_id).first()
@@ -385,24 +435,30 @@ async def update_order_status(
         order.situation_msg = situation_msg
     if progress_percent is not None:
         order.progress_percent = progress_percent
+    if container_locked is not None:
+        order.container_locked = container_locked
     if status == "DELIVERED":
         order.completed_at = datetime.utcnow()
 
     db.commit()
 
-    # Broadcast live status update to WebSocket
     await ws_manager.broadcast({
         "type": "order_update",
         "order_id": order.id,
         "order_code": order.order_code,
         "status": order.status,
         "situation_msg": order.situation_msg,
-        "progress_percent": order.progress_percent
+        "progress_percent": order.progress_percent,
+        "container_locked": order.container_locked,
+        "qr_unlock_code": order.qr_unlock_code,
+        "pin_code": order.pin_code
     })
 
     return {"status": "success", "order_id": order_id, "new_status": status}
 
-# --- ROBOT TELEMETRY & SITUATION ---
+# ==========================================
+# 5. ROBOT TELEMETRY & WEBSOCKET
+# ==========================================
 
 @app.post("/api/robot/telemetry", response_model=TelemetryOut)
 async def record_robot_telemetry(data: TelemetryCreate, db: Session = Depends(get_db)):
@@ -417,13 +473,13 @@ async def record_robot_telemetry(data: TelemetryCreate, db: Session = Depends(ge
         load_g=data.load_g,
         state=data.state,
         situation_msg=data.situation_msg,
+        container_locked=data.container_locked,
         recorded_at=datetime.utcnow()
     )
     db.add(record)
     db.commit()
     db.refresh(record)
 
-    # Real-time WebSocket broadcast to all connected web dashboards
     await ws_manager.broadcast({
         "type": "telemetry",
         "robot_id": record.robot_id,
@@ -436,6 +492,7 @@ async def record_robot_telemetry(data: TelemetryCreate, db: Session = Depends(ge
         "load_g": record.load_g,
         "state": record.state,
         "situation_msg": record.situation_msg,
+        "container_locked": record.container_locked,
         "timestamp": record.recorded_at.isoformat()
     })
 
@@ -460,27 +517,16 @@ def get_latest_robot_status(robot_id: int = 1, db: Session = Depends(get_db)):
             load_g=0,
             state="IDLE",
             situation_msg="Standing by at Main Gate.",
+            container_locked=True,
             recorded_at=datetime.utcnow()
         )
     return latest
-
-# --- WEBSOCKET FOR REAL-TIME CLIENT STREAMING ---
 
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive, listen for ping or teleop override
-            data = await websocket.receive_text()
-            try:
-                msg = json.loads(data)
-                if msg.get("type") == "teleop":
-                    cmd = msg.get("command")
-                    print(f"[Teleop WS Command]: {cmd}")
-                    if mqtt_client and mqtt_client.is_connected():
-                        mqtt_client.publish("robot/1/command", json.dumps({"action": "teleop", "cmd": cmd}))
-            except Exception:
-                pass
+            await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)

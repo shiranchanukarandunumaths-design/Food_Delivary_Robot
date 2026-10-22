@@ -4,10 +4,77 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Campus Food & Parcel Delivery Rover — University of Colombo</title>
+  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- QR Code Generator JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- App Stylesheet -->
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- ========================================== -->
+  <!-- USER AUTHENTICATION MODAL (LOGIN / REGISTER)-->
+  <!-- ========================================== -->
+  <div id="auth-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-tabs">
+        <button id="tab-login" class="tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
+        <button id="tab-register" class="tab-btn" onclick="switchAuthTab('register')">Register Student / Staff</button>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+        <h3>Welcome Back to Rover Delivery</h3>
+        <p class="auth-sub">Sign in with your University or Gmail account</p>
+        <div class="form-group">
+          <label for="login-email">Gmail / University Email:</label>
+          <input type="email" id="login-email" placeholder="e.g. hiruna@gmail.com" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password:</label>
+          <input type="password" id="login-password" placeholder="••••••••" required />
+        </div>
+        <button type="submit" class="btn btn-primary">Sign In</button>
+      </form>
+
+      <!-- Register Form -->
+      <form id="register-form" class="auth-form" style="display: none;" onsubmit="handleRegister(event)">
+        <h3>Create Rover Delivery Account</h3>
+        <p class="auth-sub">Register to place food, clothes, notes & lab orders</p>
+        <div class="form-group">
+          <label for="reg-email">Gmail / Email:</label>
+          <input type="email" id="reg-email" placeholder="student@gmail.com" required />
+        </div>
+        <div class="form-group">
+          <label for="reg-password">Password:</label>
+          <input type="password" id="reg-password" placeholder="Create strong password" required />
+        </div>
+        <div class="form-group">
+          <label for="reg-name">Full Name:</label>
+          <input type="text" id="reg-name" placeholder="Hiruna Perera" required />
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="reg-studentid">Student / Staff ID:</label>
+            <input type="text" id="reg-studentid" placeholder="SC/2022/10452" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="reg-phone">Phone Number:</label>
+            <input type="tel" id="reg-phone" placeholder="0771234567" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reg-dept">Faculty / Department:</label>
+          <input type="text" id="reg-dept" placeholder="Department of Physics" required />
+        </div>
+        <button type="submit" class="btn btn-primary">Register Account</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MAIN APPLICATION LAYOUT -->
+  <!-- ========================================== -->
   <div class="app-container">
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -17,10 +84,13 @@
           <h2>🤖 UOC Rover Dispatch</h2>
           <span class="sub-text">Autonomous Campus Delivery • PH 3042</span>
         </div>
-        <span class="badge">UOC SCIENCE</span>
+        <div class="user-profile-badge" id="user-badge" onclick="openAuthModal()">
+          <span class="avatar-icon">👤</span>
+          <span id="user-name-display">Guest</span>
+        </div>
       </div>
 
-      <!-- Live Backend & Robot Status -->
+      <!-- Live Connection & Rover Status -->
       <div class="card status-card">
         <div class="status-row">
           <span>Server / WebSocket:</span>
@@ -30,9 +100,20 @@
           <span>Rover State:</span>
           <span id="robot-status-pill" class="pill idle">IDLE</span>
         </div>
+        <div class="status-row">
+          <span>Container Hatch:</span>
+          <span id="container-lock-pill" class="pill locked">🔒 LOCKED</span>
+        </div>
       </div>
 
-      <!-- Live Path Situation Banner (Active Trip Announcement) -->
+      <!-- View Map / Delivery Path Optional Toggle Button -->
+      <div class="card toggle-card">
+        <button id="btn-toggle-map" class="btn btn-map-toggle" onclick="toggleMapView()">
+          🗺️ Hide Satellite Map (Compact View)
+        </button>
+      </div>
+
+      <!-- Live Path Situation Card -->
       <div class="card situation-card" id="situation-card">
         <div class="situation-header">
           <span class="pulse-indicator"></span>
@@ -49,33 +130,47 @@
         </div>
       </div>
 
-      <!-- Arrival Notification Modal Banner -->
+      <!-- ========================================== -->
+      <!-- ARRIVAL & SECURE QR UNLOCK MODAL BANNER -->
+      <!-- ========================================== -->
       <div class="card arrival-card" id="arrival-card" style="display: none;">
-        <div class="arrival-content">
+        <div class="arrival-header">
           <span class="arrival-icon">🎉</span>
-          <div class="arrival-text">
-            <h4>ROVER HAS LANDED!</h4>
-            <p id="arrival-msg">Your package has arrived at your destination! Please collect your item from Rover #1 cargo tray.</p>
+          <div>
+            <h4>ROVER HAS LANDED AT YOUR LOCATION!</h4>
+            <p id="arrival-msg">Cargo container is locked. Match QR code to open cargo hatch.</p>
           </div>
+        </div>
+
+        <!-- User QR Code Display -->
+        <div class="qr-container">
+          <div class="qr-box">
+            <div id="user-qrcode"></div>
+            <div class="pin-badge">
+              <span>Backup PIN: <strong id="qr-pin-text">------</strong></span>
+            </div>
+          </div>
+          <div class="qr-instructions">
+            <p><strong>Step 1:</strong> Hold this QR code to Rover #1 scanner camera.</p>
+            <p><strong>Step 2:</strong> When verified, container hatch will click open!</p>
+          </div>
+        </div>
+
+        <!-- Simulated Robot Side Optical Scanner / Verify Button -->
+        <div class="robot-scanner-sim">
+          <h5>🤖 Robot Touchscreen / Optical Scanner:</h5>
+          <button type="button" class="btn btn-unlock" onclick="simulateQRScan()">
+            📷 Scan / Match QR Code to Open Container
+          </button>
         </div>
       </div>
 
-      <!-- Order Form (Delivery Request) -->
+      <!-- ========================================== -->
+      <!-- ORDER FORM (DELIVERY REQUEST) -->
+      <!-- ========================================== -->
       <div class="card order-card">
         <h3>📦 Request Campus Delivery</h3>
         <form id="order-form">
-          <!-- User Details -->
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label for="recipient-name">Your Name / ID:</label>
-              <input type="text" id="recipient-name" value="Hiruna (3rd Yr Physics)" required />
-            </div>
-            <div class="form-group flex-1">
-              <label for="recipient-phone">Phone No:</label>
-              <input type="text" id="recipient-phone" value="0771234567" />
-            </div>
-          </div>
-
           <!-- Pickup & Destination -->
           <div class="form-group">
             <label for="pickup-select">Pickup Location (Collection Point):</label>
@@ -88,7 +183,7 @@
           <div class="form-group highlight-group">
             <label for="dest-select">Where are you staying? (Your Place):</label>
             <select id="dest-select" required>
-              <option value="" disabled selected>Select Your Destination...</option>
+              <option value="" disabled selected>Loading destinations...</option>
             </select>
           </div>
 
@@ -152,43 +247,91 @@
         </div>
       </div>
 
-      <!-- Admin Tools: Map Node / Route Editor -->
+      <!-- ========================================== -->
+      <!-- ADMIN: INTERACTIVE ROUTE & ROAD TRAINER -->
+      <!-- ========================================== -->
       <div class="card admin-card">
         <div class="admin-header" onclick="toggleAdminPanel()">
-          <h3>🛠️ Admin: Route & Node Editor</h3>
+          <h3>🛠️ Admin: Route Trainer & Road Builder</h3>
           <span id="admin-toggle-icon">▼</span>
         </div>
         <div id="admin-panel" style="display: none;">
-          <p class="small-text">Click on the map to add a new delivery point or edit routes.</p>
-          <div class="form-group">
-            <label for="new-node-name">New Point Name:</label>
-            <input type="text" id="new-node-name" placeholder="e.g. Botanical Garden Bench" />
+          <p class="small-text">Mark accurate campus roads and custom user staying locations.</p>
+          
+          <!-- Mode 1: Add Node / Landmark -->
+          <div class="admin-sub-section">
+            <h4>1. Place New Landmark / Staying Place</h4>
+            <div class="form-group">
+              <input type="text" id="new-node-name" placeholder="e.g. Physics Research Lab 3" />
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <select id="new-node-type">
+                  <option value="destination">Destination</option>
+                  <option value="pickup_point">Pickup Point</option>
+                  <option value="junction">Road Junction</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-secondary flex-1" id="btn-add-point-mode" onclick="enableAddPointMode()">
+                📍 Place on Map
+              </button>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="new-node-type">Point Type:</label>
-            <select id="new-node-type">
-              <option value="destination">Destination</option>
-              <option value="pickup_point">Pickup Point</option>
-              <option value="junction">Junction</option>
-            </select>
+
+          <!-- Mode 2: Train Road Segment -->
+          <div class="admin-sub-section">
+            <h4>2. Train & Mark Real Road Pathway</h4>
+            <div class="form-group">
+              <label>Road Name:</label>
+              <input type="text" id="road-name-input" placeholder="e.g. Canteen to Physics Paved Walkway" />
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>Start Node:</label>
+                <select id="road-start-node"></select>
+              </div>
+              <div class="form-group flex-1">
+                <label>End Node:</label>
+                <select id="road-end-node"></select>
+              </div>
+            </div>
+            <div class="road-training-actions">
+              <button type="button" class="btn btn-warning" id="btn-train-road" onclick="toggleRoadTraining()">
+                🛣️ Start Clicking Road Waypoints
+              </button>
+              <div id="road-points-counter" style="display:none; margin: 6px 0; font-size: 0.78rem; color:#fde047;">
+                Road points marked: <strong id="road-pts-count">0</strong> pts
+              </div>
+              <button type="button" class="btn btn-success" id="btn-save-road" onclick="saveTrainedRoad()" style="display:none;">
+                💾 Save Trained Road to Database
+              </button>
+            </div>
           </div>
-          <button type="button" class="btn btn-secondary" id="btn-add-point-mode" onclick="enableAddPointMode()">
-            📍 Click Map to Place Point
-          </button>
+
+          <div class="admin-sub-section">
+            <button type="button" class="btn btn-danger-outline" onclick="clearAllTrainedRoads()">
+              🗑️ Clear Default Sample Roads
+            </button>
+          </div>
         </div>
       </div>
     </aside>
 
-    <!-- Main Map View -->
-    <main class="main-content">
+    <!-- Main Map View (Satellite Map) -->
+    <main class="main-content" id="map-container">
       <div id="map"></div>
-      <!-- Map Overlay Controls -->
       <div class="map-overlay-badge">
         <span class="dot-live"></span> University of Colombo Science Faculty (Satellite WGS84)
+      </div>
+      <!-- Road Training Instruction Banner -->
+      <div id="road-training-banner" class="road-training-banner" style="display: none;">
+        <span>🎯 <strong>Road Training Mode Active:</strong> Click along the satellite walkways to lay down path waypoints.</span>
+        <button class="btn btn-small btn-secondary" onclick="cancelRoadTraining()">Cancel</button>
       </div>
     </main>
   </div>
 
+  <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
