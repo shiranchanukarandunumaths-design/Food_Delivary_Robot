@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Campus Food Delivery Robot — Mission Control</title>
+  <title>Campus Food & Parcel Delivery Rover — University of Colombo</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -11,71 +11,126 @@
   <div class="app-container">
     <!-- Sidebar -->
     <aside class="sidebar">
+      <!-- Brand & Header -->
       <div class="brand">
-        <h2>🤖 Rover Mission Control</h2>
-        <span class="badge">UOC PH 3042</span>
+        <div class="brand-title">
+          <h2>🤖 UOC Rover Dispatch</h2>
+          <span class="sub-text">Autonomous Campus Delivery • PH 3042</span>
+        </div>
+        <span class="badge">UOC SCIENCE</span>
       </div>
 
-      <!-- Connection Status -->
+      <!-- Live Backend & Robot Status -->
       <div class="card status-card">
         <div class="status-row">
-          <span>Backend API:</span>
-          <span id="api-status" class="pill offline">Checking...</span>
+          <span>Server / WebSocket:</span>
+          <span id="api-status" class="pill offline">Connecting...</span>
         </div>
         <div class="status-row">
-          <span>Robot Link:</span>
+          <span>Rover State:</span>
           <span id="robot-status-pill" class="pill idle">IDLE</span>
         </div>
       </div>
 
-      <!-- Order Placement Form -->
-      <div class="card">
-        <h3>📦 Place Delivery Order</h3>
-        <form id="order-form">
-          <div class="form-group">
-            <label for="pickup-select">Pickup Point (Food Source):</label>
-            <select id="pickup-select" required>
-              <option value="" disabled selected>Select Pickup...</option>
-            </select>
+      <!-- Live Path Situation Banner (Active Trip Announcement) -->
+      <div class="card situation-card" id="situation-card">
+        <div class="situation-header">
+          <span class="pulse-indicator"></span>
+          <span class="situation-title">LIVE PATH SITUATION</span>
+        </div>
+        <div class="situation-body" id="situation-text">
+          Rover standby at Faculty Main Gate. Ready to dispatch.
+        </div>
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" id="trip-progress-bar" style="width: 0%;"></div>
           </div>
-
-          <div class="form-group">
-            <label for="dest-select">Destination (Drop-off):</label>
-            <select id="dest-select" required>
-              <option value="" disabled selected>Select Destination...</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="recipient-name">Recipient Name:</label>
-            <input type="text" id="recipient-name" value="Student / Faculty" required />
-          </div>
-
-          <button type="submit" id="btn-dispatch" class="btn btn-primary">Dispatch Robot 🚀</button>
-        </form>
-      </div>
-
-      <!-- Active Mission Info -->
-      <div class="card" id="mission-card" style="display: none;">
-        <h3>📍 Active Mission</h3>
-        <p><strong>Order:</strong> <span id="mission-code">-</span></p>
-        <p><strong>Distance:</strong> <span id="mission-dist">-</span> m</p>
-        <p><strong>Waypoints:</strong> <span id="mission-pts">-</span> pts</p>
-        <div class="progress-bar">
-          <div class="progress-fill" id="mission-progress" style="width: 0%;"></div>
+          <span class="progress-label" id="trip-progress-label">0% completed</span>
         </div>
       </div>
 
-      <!-- Robot Telemetry -->
+      <!-- Arrival Notification Modal Banner -->
+      <div class="card arrival-card" id="arrival-card" style="display: none;">
+        <div class="arrival-content">
+          <span class="arrival-icon">🎉</span>
+          <div class="arrival-text">
+            <h4>ROVER HAS LANDED!</h4>
+            <p id="arrival-msg">Your package has arrived at your destination! Please collect your item from Rover #1 cargo tray.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Order Form (Delivery Request) -->
+      <div class="card order-card">
+        <h3>📦 Request Campus Delivery</h3>
+        <form id="order-form">
+          <!-- User Details -->
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="recipient-name">Your Name / ID:</label>
+              <input type="text" id="recipient-name" value="Hiruna (3rd Yr Physics)" required />
+            </div>
+            <div class="form-group flex-1">
+              <label for="recipient-phone">Phone No:</label>
+              <input type="text" id="recipient-phone" value="0771234567" />
+            </div>
+          </div>
+
+          <!-- Pickup & Destination -->
+          <div class="form-group">
+            <label for="pickup-select">Pickup Location (Collection Point):</label>
+            <select id="pickup-select" required>
+              <option value="1" selected>Faculty Main Gate (Reid Ave)</option>
+              <option value="6">Faculty Canteen / Cafeteria</option>
+            </select>
+          </div>
+
+          <div class="form-group highlight-group">
+            <label for="dest-select">Where are you staying? (Your Place):</label>
+            <select id="dest-select" required>
+              <option value="" disabled selected>Select Your Destination...</option>
+            </select>
+          </div>
+
+          <!-- Item Variety Selection -->
+          <div class="form-group">
+            <label for="item-variety">Item Variety / Category:</label>
+            <select id="item-variety" required>
+              <option value="Food" selected>🍱 Food / Meals</option>
+              <option value="Drinks">☕ Drinks & Beverages</option>
+              <option value="Clothes">👕 Clothes / Laundry</option>
+              <option value="Notes">📚 Notes / Study Materials</option>
+              <option value="Lab Equipment">🔬 Lab Equipment / Instruments</option>
+              <option value="Other">📦 Other Parcel</option>
+            </select>
+          </div>
+
+          <!-- Emergency Rush Delivery Option -->
+          <div class="form-group emergency-container">
+            <label class="emergency-toggle">
+              <input type="checkbox" id="emergency-check" />
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">🚨 EMERGENCY RUSH DELIVERY</span>
+            </label>
+            <small class="help-text">Prioritizes rover queue for urgent lab tools or hot food.</small>
+          </div>
+
+          <button type="submit" id="btn-dispatch" class="btn btn-primary">
+            Dispatch Rover Now 🚀
+          </button>
+        </form>
+      </div>
+
+      <!-- Live Telemetry Card -->
       <div class="card telemetry-card">
-        <h3>⚡ Robot Telemetry</h3>
+        <h3>⚡ Rover Live Telemetry</h3>
         <div class="telemetry-grid">
           <div class="tele-item">
-            <span class="tele-label">Battery</span>
+            <span class="tele-label">Battery (12V)</span>
             <span class="tele-value" id="tele-battery">12.4 V</span>
           </div>
           <div class="tele-item">
-            <span class="tele-label">Load Cell</span>
+            <span class="tele-label">Cargo Load Cell</span>
             <span class="tele-value" id="tele-load">0 g</span>
           </div>
           <div class="tele-item">
@@ -89,25 +144,48 @@
         </div>
       </div>
 
-      <!-- Manual Teleop Override -->
-      <div class="card teleop-card">
-        <h3>🎮 Manual Override</h3>
-        <div class="dpad">
-          <button class="btn btn-ctrl" onclick="sendTeleop('w')">▲</button>
-          <div class="dpad-mid">
-            <button class="btn btn-ctrl" onclick="sendTeleop('a')">◀</button>
-            <button class="btn btn-danger" onclick="sendTeleop('stop')">⏹</button>
-            <button class="btn btn-ctrl" onclick="sendTeleop('d')">▶</button>
-          </div>
-          <button class="btn btn-ctrl" onclick="sendTeleop('s')">▼</button>
+      <!-- Priority Orders Queue -->
+      <div class="card queue-card">
+        <h3>📋 Dispatch Priority Queue</h3>
+        <div id="orders-queue-list" class="orders-queue-list">
+          <p class="muted-text">No pending orders.</p>
         </div>
-        <button class="btn btn-estop" onclick="sendTeleop('estop')">🚨 EMERGENCY STOP</button>
+      </div>
+
+      <!-- Admin Tools: Map Node / Route Editor -->
+      <div class="card admin-card">
+        <div class="admin-header" onclick="toggleAdminPanel()">
+          <h3>🛠️ Admin: Route & Node Editor</h3>
+          <span id="admin-toggle-icon">▼</span>
+        </div>
+        <div id="admin-panel" style="display: none;">
+          <p class="small-text">Click on the map to add a new delivery point or edit routes.</p>
+          <div class="form-group">
+            <label for="new-node-name">New Point Name:</label>
+            <input type="text" id="new-node-name" placeholder="e.g. Botanical Garden Bench" />
+          </div>
+          <div class="form-group">
+            <label for="new-node-type">Point Type:</label>
+            <select id="new-node-type">
+              <option value="destination">Destination</option>
+              <option value="pickup_point">Pickup Point</option>
+              <option value="junction">Junction</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-add-point-mode" onclick="enableAddPointMode()">
+            📍 Click Map to Place Point
+          </button>
+        </div>
       </div>
     </aside>
 
-    <!-- Map Container -->
+    <!-- Main Map View -->
     <main class="main-content">
       <div id="map"></div>
+      <!-- Map Overlay Controls -->
+      <div class="map-overlay-badge">
+        <span class="dot-live"></span> University of Colombo Science Faculty (Satellite WGS84)
+      </div>
     </main>
   </div>
 
