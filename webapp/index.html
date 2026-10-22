@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Campus Food Delivery Robot — Mission Control</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <h2>🤖 Rover Mission Control</h2>
+        <span class="badge">UOC PH 3042</span>
+      </div>
+
+      <!-- Connection Status -->
+      <div class="card status-card">
+        <div class="status-row">
+          <span>Backend API:</span>
+          <span id="api-status" class="pill offline">Checking...</span>
+        </div>
+        <div class="status-row">
+          <span>Robot Link:</span>
+          <span id="robot-status-pill" class="pill idle">IDLE</span>
+        </div>
+      </div>
+
+      <!-- Order Placement Form -->
+      <div class="card">
+        <h3>📦 Place Delivery Order</h3>
+        <form id="order-form">
+          <div class="form-group">
+            <label for="pickup-select">Pickup Point (Food Source):</label>
+            <select id="pickup-select" required>
+              <option value="" disabled selected>Select Pickup...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="dest-select">Destination (Drop-off):</label>
+            <select id="dest-select" required>
+              <option value="" disabled selected>Select Destination...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="recipient-name">Recipient Name:</label>
+            <input type="text" id="recipient-name" value="Student / Faculty" required />
+          </div>
+
+          <button type="submit" id="btn-dispatch" class="btn btn-primary">Dispatch Robot 🚀</button>
+        </form>
+      </div>
+
+      <!-- Active Mission Info -->
+      <div class="card" id="mission-card" style="display: none;">
+        <h3>📍 Active Mission</h3>
+        <p><strong>Order:</strong> <span id="mission-code">-</span></p>
+        <p><strong>Distance:</strong> <span id="mission-dist">-</span> m</p>
+        <p><strong>Waypoints:</strong> <span id="mission-pts">-</span> pts</p>
+        <div class="progress-bar">
+          <div class="progress-fill" id="mission-progress" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Robot Telemetry -->
+      <div class="card telemetry-card">
+        <h3>⚡ Robot Telemetry</h3>
+        <div class="telemetry-grid">
+          <div class="tele-item">
+            <span class="tele-label">Battery</span>
+            <span class="tele-value" id="tele-battery">12.4 V</span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">Load Cell</span>
+            <span class="tele-value" id="tele-load">0 g</span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">Speed</span>
+            <span class="tele-value" id="tele-speed">0.0 m/s</span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">Heading</span>
+            <span class="tele-value" id="tele-heading">0°</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual Teleop Override -->
+      <div class="card teleop-card">
+        <h3>🎮 Manual Override</h3>
+        <div class="dpad">
+          <button class="btn btn-ctrl" onclick="sendTeleop('w')">▲</button>
+          <div class="dpad-mid">
+            <button class="btn btn-ctrl" onclick="sendTeleop('a')">◀</button>
+            <button class="btn btn-danger" onclick="sendTeleop('stop')">⏹</button>
+            <button class="btn btn-ctrl" onclick="sendTeleop('d')">▶</button>
+          </div>
+          <button class="btn btn-ctrl" onclick="sendTeleop('s')">▼</button>
+        </div>
+        <button class="btn btn-estop" onclick="sendTeleop('estop')">🚨 EMERGENCY STOP</button>
+      </div>
+    </aside>
+
+    <!-- Map Container -->
+    <main class="main-content">
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "food-delivery-robot-webapp",
+  "version": "1.0.0",
+  "description": "Campus Autonomous Food Delivery Robot Web Application",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  }
+}

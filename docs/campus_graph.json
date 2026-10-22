@@ -1,0 +1,158 @@
+{
+  "campus": "University of Colombo - Faculty of Science",
+  "base_coordinates": {
+    "latitude": 6.9015,
+    "longitude": 79.8605
+  },
+  "nodes": [
+    {
+      "id": 1,
+      "code": "MAIN_GATE",
+      "name": "Faculty Main Gate (Reid Ave)",
+      "lat": 6.90150,
+      "lng": 79.86005,
+      "type": "entry_point"
+    },
+    {
+      "id": 2,
+      "code": "QUADRANGLE",
+      "name": "Science Quadrangle Junction",
+      "lat": 6.90175,
+      "lng": 79.86050,
+      "type": "junction"
+    },
+    {
+      "id": 3,
+      "code": "PHYSICS",
+      "name": "Department of Physics (PH 3042)",
+      "lat": 6.90210,
+      "lng": 79.86060,
+      "type": "destination"
+    },
+    {
+      "id": 4,
+      "code": "CHEMISTRY",
+      "name": "Department of Chemistry",
+      "lat": 6.90190,
+      "lng": 79.86120,
+      "type": "destination"
+    },
+    {
+      "id": 5,
+      "code": "LIBRARY",
+      "name": "Science Faculty Library",
+      "lat": 6.90140,
+      "lng": 79.86110,
+      "type": "destination"
+    },
+    {
+      "id": 6,
+      "code": "CANTEEN",
+      "name": "Faculty Canteen / Cafeteria",
+      "lat": 6.90120,
+      "lng": 79.86060,
+      "type": "pickup_point"
+    },
+    {
+      "id": 7,
+      "code": "MATHS",
+      "name": "Department of Mathematics",
+      "lat": 6.90230,
+      "lng": 79.86100,
+      "type": "destination"
+    }
+  ],
+  "edges": [
+    {
+      "id": 1,
+      "from_node_id": 1,
+      "to_node_id": 2,
+      "name": "Main Gate to Quadrangle",
+      "distance_m": 58.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90150, "lng": 79.86005},
+        {"lat": 6.90162, "lng": 79.86025},
+        {"lat": 6.90175, "lng": 79.86050}
+      ]
+    },
+    {
+      "id": 2,
+      "from_node_id": 2,
+      "to_node_id": 3,
+      "name": "Quadrangle to Physics",
+      "distance_m": 41.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90175, "lng": 79.86050},
+        {"lat": 6.90195, "lng": 79.86055},
+        {"lat": 6.90210, "lng": 79.86060}
+      ]
+    },
+    {
+      "id": 3,
+      "from_node_id": 2,
+      "to_node_id": 4,
+      "name": "Quadrangle to Chemistry",
+      "distance_m": 80.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90175, "lng": 79.86050},
+        {"lat": 6.90182, "lng": 79.86085},
+        {"lat": 6.90190, "lng": 79.86120}
+      ]
+    },
+    {
+      "id": 4,
+      "from_node_id": 2,
+      "to_node_id": 5,
+      "name": "Quadrangle to Science Library",
+      "distance_m": 77.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90175, "lng": 79.86050},
+        {"lat": 6.90155, "lng": 79.86080},
+        {"lat": 6.90140, "lng": 79.86110}
+      ]
+    },
+    {
+      "id": 5,
+      "from_node_id": 2,
+      "to_node_id": 6,
+      "name": "Quadrangle to Faculty Canteen",
+      "distance_m": 62.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90175, "lng": 79.86050},
+        {"lat": 6.90145, "lng": 79.86055},
+        {"lat": 6.90120, "lng": 79.86060}
+      ]
+    },
+    {
+      "id": 6,
+      "from_node_id": 3,
+      "to_node_id": 7,
+      "name": "Physics to Mathematics",
+      "distance_m": 49.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90210, "lng": 79.86060},
+        {"lat": 6.90220, "lng": 79.86080},
+        {"lat": 6.90230, "lng": 79.86100}
+      ]
+    },
+    {
+      "id": 7,
+      "from_node_id": 4,
+      "to_node_id": 7,
+      "name": "Chemistry to Mathematics",
+      "distance_m": 48.0,
+      "bidirectional": true,
+      "waypoints": [
+        {"lat": 6.90190, "lng": 79.86120},
+        {"lat": 6.90215, "lng": 79.86110},
+        {"lat": 6.90230, "lng": 79.86100}
+      ]
+    }
+  ]
+}
