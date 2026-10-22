@@ -1,0 +1,12 @@
+{
+  "files.associations": {
+    "*.ino": "cpp",
+    "*.h": "cpp",
+    "*.hpp": "cpp",
+    "*.cpp": "cpp"
+  },
+  "git.enableSmartCommit": true,
+  "git.autofetch": true,
+  "editor.tabSize": 2,
+  "editor.formatOnSave": true
+}
