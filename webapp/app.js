@@ -41,16 +41,17 @@ function initMap() {
     maxZoom: 21
   });
 
+  // OpenStreetMap Standard Street Layer (Pedestrian & Campus Walkways)
   const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors &bull; UOC Autonomous Rover (PH 3042)',
     maxZoom: 19
   });
 
   esriSat.addTo(map);
 
   L.control.layers({
-    "Satellite (Esri World Imagery)": esriSat,
-    "Street Map (OSM)": osm
+    "🛰️ Satellite (Esri Imagery)": esriSat,
+    "🗺️ OpenStreetMap (Walkways & Roads)": osm
   }, null, { position: 'topright' }).addTo(map);
 
   // Custom Animated Rover Icon
