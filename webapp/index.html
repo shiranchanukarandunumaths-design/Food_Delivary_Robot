@@ -13,62 +13,84 @@
 </head>
 <body>
   <!-- ========================================== -->
-  <!-- USER AUTHENTICATION MODAL (LOGIN / REGISTER)-->
+  <!-- PATH SUGGESTION MODAL                     -->
   <!-- ========================================== -->
-  <div id="auth-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-box">
-      <div class="modal-tabs">
-        <button id="tab-login" class="tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
-        <button id="tab-register" class="tab-btn" onclick="switchAuthTab('register')">Register Student / Staff</button>
+  <div id="path-modal" class="path-modal-overlay" style="display:none;">
+    <div class="path-modal-box">
+      <div class="path-modal-header">
+        <span class="path-modal-icon">🧭</span>
+        <div>
+          <h3>Route Planner — Choose Your Path</h3>
+          <p>Global pathfinding has computed the optimal delivery routes for your order.</p>
+        </div>
       </div>
+      <div class="path-modal-body">
 
-      <!-- Login Form -->
-      <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
-        <h3>Welcome Back to Rover Delivery</h3>
-        <p class="auth-sub">Sign in with your University or Gmail account</p>
-        <div class="form-group">
-          <label for="login-email">Gmail / University Email:</label>
-          <input type="email" id="login-email" placeholder="e.g. hiruna@gmail.com" required />
+        <!-- Primary Route Card -->
+        <div class="route-option" id="route-primary-card" onclick="selectRoute('primary')">
+          <div class="route-option-header">
+            <div class="route-option-title">
+              🟢 Route A — Shortest Path
+              <span class="route-badge primary">RECOMMENDED</span>
+            </div>
+            <span id="primary-select-mark" style="color:var(--blue); font-size:1.2rem;">✓</span>
+          </div>
+          <div class="route-stats">
+            <div class="route-stat">
+              <span class="route-stat-label">Distance</span>
+              <span class="route-stat-value" id="primary-dist">— m</span>
+            </div>
+            <div class="route-stat">
+              <span class="route-stat-label">Est. Time</span>
+              <span class="route-stat-value" id="primary-time">— min</span>
+            </div>
+            <div class="route-stat">
+              <span class="route-stat-label">Energy Use</span>
+              <span class="route-stat-value" id="primary-energy">— Wh</span>
+            </div>
+          </div>
+          <div class="route-nodes" id="primary-nodes">Computing…</div>
         </div>
-        <div class="form-group">
-          <label for="login-password">Password:</label>
-          <input type="password" id="login-password" placeholder="••••••••" required />
-        </div>
-        <button type="submit" class="btn btn-primary">Sign In</button>
-      </form>
 
-      <!-- Register Form -->
-      <form id="register-form" class="auth-form" style="display: none;" onsubmit="handleRegister(event)">
-        <h3>Create Rover Delivery Account</h3>
-        <p class="auth-sub">Register to place food, clothes, notes & lab orders</p>
-        <div class="form-group">
-          <label for="reg-email">Gmail / Email:</label>
-          <input type="email" id="reg-email" placeholder="student@gmail.com" required />
-        </div>
-        <div class="form-group">
-          <label for="reg-password">Password:</label>
-          <input type="password" id="reg-password" placeholder="Create strong password" required />
-        </div>
-        <div class="form-group">
-          <label for="reg-name">Full Name:</label>
-          <input type="text" id="reg-name" placeholder="Hiruna Perera" required />
-        </div>
-        <div class="form-row">
-          <div class="form-group flex-1">
-            <label for="reg-studentid">Student / Staff ID:</label>
-            <input type="text" id="reg-studentid" placeholder="SC/2022/10452" required />
+        <!-- Alternative Route Card -->
+        <div class="route-option" id="route-alt-card" onclick="selectRoute('alt')" style="opacity:0.7;">
+          <div class="route-option-header">
+            <div class="route-option-title">
+              🟠 Route B — Alternative Path
+              <span class="route-badge alt">ALTERNATIVE</span>
+            </div>
+            <span id="alt-select-mark" style="color:var(--brown-mid); font-size:1.2rem; display:none;">✓</span>
           </div>
-          <div class="form-group flex-1">
-            <label for="reg-phone">Phone Number:</label>
-            <input type="tel" id="reg-phone" placeholder="0771234567" required />
+          <div class="route-stats">
+            <div class="route-stat">
+              <span class="route-stat-label">Distance</span>
+              <span class="route-stat-value" id="alt-dist">Loading…</span>
+            </div>
+            <div class="route-stat">
+              <span class="route-stat-label">Est. Time</span>
+              <span class="route-stat-value" id="alt-time">— min</span>
+            </div>
+            <div class="route-stat">
+              <span class="route-stat-label">Energy Use</span>
+              <span class="route-stat-value" id="alt-energy">— Wh</span>
+            </div>
           </div>
+          <div class="route-nodes" id="alt-nodes">Fetching alternative…</div>
         </div>
-        <div class="form-group">
-          <label for="reg-dept">Faculty / Department:</label>
-          <input type="text" id="reg-dept" placeholder="Department of Physics" required />
+
+        <div class="path-modal-actions">
+          <button class="btn-path-accept" onclick="confirmRouteAndDispatch()">
+            ✅ Accept & Dispatch Rover
+          </button>
+          <button class="btn-path-alt" id="btn-suggest-alt" onclick="showAltRoute()">
+            🔄 Suggest Alternative
+          </button>
         </div>
-        <button type="submit" class="btn btn-primary">Register Account</button>
-      </form>
+
+        <div style="font-size:0.7rem; color:var(--text-muted); text-align:center; margin-top:10px;">
+          Dijkstra shortest-path algorithm • Energy estimated at 0.012 Wh/m (flat terrain) on a 12V system
+        </div>
+      </div>
     </div>
   </div>
 
@@ -84,9 +106,12 @@
           <h2>🤖 UOC Rover Dispatch</h2>
           <span class="sub-text">Autonomous Campus Delivery • PH 3042</span>
         </div>
-        <div class="user-profile-badge" id="user-badge" onclick="openAuthModal()">
-          <span class="avatar-icon">👤</span>
-          <span id="user-name-display">Guest</span>
+        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+          <div class="user-profile-badge" id="user-badge">
+            <span class="avatar-icon">👤</span>
+            <span id="user-name-display">Loading…</span>
+          </div>
+          <button class="btn-logout" onclick="handleLogout()" title="Sign Out">↩ Out</button>
         </div>
       </div>
 

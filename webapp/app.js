@@ -1,5 +1,6 @@
 // Campus Autonomous Delivery Web Dashboard
 // PH 3042 - Robotics & Automation (University of Colombo)
+// Theme: White · Brown · Blue  (Professional Academic)
 
 const API_BASE = "http://127.0.0.1:8000/api";
 const WS_BASE = "ws://127.0.0.1:8000/ws/telemetry";
@@ -101,17 +102,10 @@ function loadUserSession() {
     }
   }
 
-  if (!currentUser) {
-    // Default account for quick demo
-    currentUser = {
-      email: "hiruna@gmail.com",
-      full_name: "Hiruna Perera",
-      student_id: "SC/2022/10452",
-      phone: "0771234567",
-      department: "Department of Physics",
-      role: "student"
-    };
-    localStorage.setItem("rover_user", JSON.stringify(currentUser));
+  // AUTH GUARD: redirect to login if not logged in
+  if (!currentUser || !currentUser.email) {
+    window.location.href = "login.html";
+    return;
   }
 
   updateUserBadge();
@@ -120,18 +114,21 @@ function loadUserSession() {
 function updateUserBadge() {
   const badgeText = document.getElementById('user-name-display');
   if (currentUser) {
-    badgeText.textContent = `${currentUser.full_name.split(' ')[0]} (${currentUser.department || 'Student'})`;
+    const name = currentUser.full_name ? currentUser.full_name.split(' ')[0] : currentUser.email;
+    badgeText.textContent = `${name} (${currentUser.department || 'Student'})`;
   } else {
     badgeText.textContent = "Sign In";
   }
 }
 
 function openAuthModal() {
-  document.getElementById('auth-modal').style.display = 'flex';
+  // Now redirects to dedicated login page
+  window.location.href = "login.html";
 }
 
 function closeAuthModal() {
-  document.getElementById('auth-modal').style.display = 'none';
+  const m = document.getElementById('auth-modal');
+  if (m) m.style.display = 'none';
 }
 
 function switchAuthTab(tab) {
@@ -169,7 +166,6 @@ async function handleLogin(e) {
     localStorage.setItem("rover_user", JSON.stringify(currentUser));
     updateUserBadge();
     closeAuthModal();
-    alert(`Welcome back, ${currentUser.full_name}!`);
   } catch (err) {
     alert(err.message);
   }
@@ -205,16 +201,22 @@ async function handleRegister(e) {
     localStorage.setItem("rover_user", JSON.stringify(currentUser));
     updateUserBadge();
     closeAuthModal();
-    alert(`Account created successfully for ${currentUser.full_name}!`);
   } catch (err) {
     alert(err.message);
   }
 }
 
+// LOGOUT
+function handleLogout() {
+  if (!confirm("Sign out of Rover Dispatch?")) return;
+  localStorage.removeItem("rover_user");
+  window.location.href = "login.html";
+}
+
 // Close modal when clicking outside box
 window.onclick = function(event) {
   const modal = document.getElementById('auth-modal');
-  if (event.target === modal) {
+  if (modal && event.target === modal) {
     closeAuthModal();
   }
 };
@@ -506,8 +508,15 @@ async function loadEdges() {
 }
 
 // ==========================================
-// 5. ORDER CREATION
+// 5. PATH SUGGESTION MODAL & ORDER CREATION
 // ==========================================
+
+// State for path modal
+let pendingOrderPayload = null;
+let primaryRouteData = null;
+let altRouteData = null;
+let selectedRoute = 'primary'; // 'primary' | 'alt'
+
 document.getElementById('order-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const pickupId = parseInt(document.getElementById('pickup-select').value);
@@ -515,41 +524,232 @@ document.getElementById('order-form').addEventListener('submit', async (e) => {
   const itemType = document.getElementById('item-variety').value;
   const isEmergency = document.getElementById('emergency-check').checked;
 
-  if (pickupId === destId) {
-    alert("Pickup and Destination cannot be the same place!");
+  if (!destId || pickupId === destId) {
+    alert("Please choose a valid delivery destination different from the pickup point!");
     return;
   }
 
-  const payload = {
-    user_name: currentUser ? currentUser.full_name : "Student",
-    user_email: currentUser ? currentUser.email : "student@gmail.com",
-    user_phone: currentUser ? currentUser.phone : "0771234567",
+  pendingOrderPayload = {
+    user_name:      currentUser ? currentUser.full_name : "Student",
+    user_email:     currentUser ? currentUser.email     : "student@gmail.com",
+    user_phone:     currentUser ? currentUser.phone     : "0771234567",
     pickup_node_id: pickupId,
-    dest_node_id: destId,
-    item_type: itemType,
-    is_emergency: isEmergency
+    dest_node_id:   destId,
+    item_type:      itemType,
+    is_emergency:   isEmergency
   };
+
+  // Show path modal and fetch primary route
+  await openPathModal(pickupId, destId);
+});
+
+async function openPathModal(startId, targetId) {
+  // Reset state
+  selectedRoute = 'primary';
+  primaryRouteData = null;
+  altRouteData = null;
+
+  // Reset UI
+  document.getElementById('route-primary-card').className = 'route-option selected';
+  document.getElementById('route-alt-card').className = 'route-option';
+  document.getElementById('route-alt-card').style.opacity = '0.7';
+  document.getElementById('primary-select-mark').style.display = '';
+  document.getElementById('alt-select-mark').style.display = 'none';
+
+  document.getElementById('primary-dist').textContent  = 'Computing…';
+  document.getElementById('primary-time').textContent  = '…';
+  document.getElementById('primary-energy').textContent = '…';
+  document.getElementById('primary-nodes').textContent  = 'Calculating shortest path…';
+
+  document.getElementById('alt-dist').textContent   = 'Fetching…';
+  document.getElementById('alt-time').textContent   = '…';
+  document.getElementById('alt-energy').textContent = '…';
+  document.getElementById('alt-nodes').textContent  = 'Computing alternative…';
+  document.getElementById('btn-suggest-alt').disabled = false;
+  document.getElementById('btn-suggest-alt').textContent = '🔄 Suggest Alternative';
+
+  document.getElementById('path-modal').style.display = 'flex';
+
+  // Fetch primary route
+  try {
+    const res = await fetch(`${API_BASE}/routes/plan?start_id=${startId}&target_id=${targetId}`);
+    if (res.ok) {
+      primaryRouteData = await res.json();
+      displayPrimaryRouteCard(primaryRouteData);
+      // Show it on map
+      showRouteOnMap(primaryRouteData.waypoints, '#1565C0', 'primary');
+    } else {
+      document.getElementById('primary-nodes').textContent = 'No path found — check trained roads.';
+    }
+  } catch (err) {
+    document.getElementById('primary-nodes').textContent = 'Backend offline — will use straight-line fallback.';
+  }
+
+  // Fetch alternative in background
+  fetchAltRoute(startId, targetId);
+}
+
+async function fetchAltRoute(startId, targetId) {
+  document.getElementById('btn-suggest-alt').innerHTML = '<span class="path-loading-spinner"></span> Loading…';
+  document.getElementById('btn-suggest-alt').disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/routes/plan/alternative?start_id=${startId}&target_id=${targetId}`);
+    if (res.ok) {
+      altRouteData = await res.json();
+      displayAltRouteCard(altRouteData);
+    } else {
+      document.getElementById('alt-dist').textContent = 'No alternative found';
+      document.getElementById('alt-nodes').textContent = 'Only one route available.';
+    }
+  } catch (err) {
+    document.getElementById('alt-dist').textContent = 'Unavailable';
+    document.getElementById('alt-nodes').textContent = 'Backend offline.';
+  } finally {
+    document.getElementById('btn-suggest-alt').disabled = false;
+    document.getElementById('btn-suggest-alt').textContent = '🔄 Suggest Alternative';
+  }
+}
+
+function routeToStats(routeData) {
+  const dist = routeData.total_distance_m || 0;
+  const timeMin = (dist / 0.5 / 60).toFixed(1);    // 0.5 m/s rover speed
+  const energyWh = (dist * 0.012).toFixed(2);       // 0.012 Wh/m @ 12V, ~1A avg
+  return { dist: Math.round(dist), timeMin, energyWh };
+}
+
+function getNodeName(nodeId) {
+  const n = nodesData.find(nd => nd.id === nodeId);
+  return n ? n.name : `Node ${nodeId}`;
+}
+
+function displayPrimaryRouteCard(routeData) {
+  const { dist, timeMin, energyWh } = routeToStats(routeData);
+  document.getElementById('primary-dist').textContent  = `${dist} m`;
+  document.getElementById('primary-time').textContent  = `${timeMin} min`;
+  document.getElementById('primary-energy').textContent = `${energyWh} Wh`;
+  if (routeData.node_sequence && routeData.node_sequence.length > 0) {
+    const names = routeData.node_sequence.map(id => getNodeName(id));
+    document.getElementById('primary-nodes').textContent = names.join(' → ');
+  } else {
+    document.getElementById('primary-nodes').textContent = 'Direct route via trained roads';
+  }
+}
+
+function displayAltRouteCard(routeData) {
+  const { dist, timeMin, energyWh } = routeToStats(routeData);
+  document.getElementById('alt-dist').textContent   = `${dist} m`;
+  document.getElementById('alt-time').textContent   = `${timeMin} min`;
+  document.getElementById('alt-energy').textContent = `${energyWh} Wh`;
+  if (routeData.node_sequence && routeData.node_sequence.length > 0) {
+    const names = routeData.node_sequence.map(id => getNodeName(id));
+    document.getElementById('alt-nodes').textContent = names.join(' → ');
+  } else {
+    document.getElementById('alt-nodes').textContent = 'Via secondary campus roads';
+  }
+  document.getElementById('route-alt-card').style.opacity = '1';
+}
+
+let altRoutePolyline = null;
+
+function showRouteOnMap(waypoints, color, type) {
+  if (!waypoints || waypoints.length === 0) return;
+  const latlngs = waypoints.map(p => [p.lat, p.lng]);
+
+  if (type === 'primary') {
+    if (activeRoutePolyline) map.removeLayer(activeRoutePolyline);
+    activeRoutePolyline = L.polyline(latlngs, {
+      color: color,
+      weight: 6,
+      opacity: 0.95
+    }).addTo(map);
+    if (isMapVisible) map.fitBounds(activeRoutePolyline.getBounds(), { padding: [50, 50] });
+  } else {
+    if (altRoutePolyline) map.removeLayer(altRoutePolyline);
+    altRoutePolyline = L.polyline(latlngs, {
+      color: color,
+      weight: 5,
+      opacity: 0.75,
+      dashArray: '8, 8'
+    }).addTo(map);
+  }
+}
+
+function selectRoute(which) {
+  selectedRoute = which;
+  if (which === 'primary') {
+    document.getElementById('route-primary-card').className = 'route-option selected';
+    document.getElementById('route-alt-card').className = 'route-option';
+    document.getElementById('route-alt-card').style.opacity = altRouteData ? '1' : '0.7';
+    document.getElementById('primary-select-mark').style.display = '';
+    document.getElementById('alt-select-mark').style.display = 'none';
+
+    // Show primary on map
+    if (primaryRouteData) showRouteOnMap(primaryRouteData.waypoints, '#1565C0', 'primary');
+    if (altRoutePolyline) { map.removeLayer(altRoutePolyline); altRoutePolyline = null; }
+  } else {
+    if (!altRouteData) return; // not yet loaded
+    document.getElementById('route-alt-card').className = 'route-option selected-alt';
+    document.getElementById('route-primary-card').className = 'route-option';
+    document.getElementById('alt-select-mark').style.display = '';
+    document.getElementById('primary-select-mark').style.display = 'none';
+
+    // Show alt on map (orange), primary dashed
+    if (altRouteData) showRouteOnMap(altRouteData.waypoints, '#e65100', 'primary');
+    if (primaryRouteData) showRouteOnMap(primaryRouteData.waypoints, '#1565C0', 'alt');
+  }
+}
+
+function showAltRoute() {
+  if (altRouteData) {
+    selectRoute('alt');
+    // Show both on map
+    if (primaryRouteData) showRouteOnMap(primaryRouteData.waypoints, '#1565C0', 'alt');
+    if (altRouteData)     showRouteOnMap(altRouteData.waypoints,     '#e65100', 'primary');
+  } else {
+    // Try re-fetching
+    if (pendingOrderPayload) {
+      fetchAltRoute(pendingOrderPayload.pickup_node_id, pendingOrderPayload.dest_node_id);
+    }
+  }
+}
+
+function closePathModal() {
+  document.getElementById('path-modal').style.display = 'none';
+  if (altRoutePolyline) { map.removeLayer(altRoutePolyline); altRoutePolyline = null; }
+}
+
+async function confirmRouteAndDispatch() {
+  if (!pendingOrderPayload) return;
+
+  // Inject chosen waypoints into payload (server uses DB anyway, but good for display)
+  const chosenRoute = selectedRoute === 'alt' && altRouteData ? altRouteData : primaryRouteData;
+
+  document.getElementById('path-modal').style.display = 'none';
 
   try {
     const res = await fetch(`${API_BASE}/orders`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(pendingOrderPayload)
     });
 
     if (!res.ok) throw new Error("Order creation failed");
     const order = await res.json();
 
     currentActiveOrder = order;
-    displayPlannedRoute(order);
+    // Override displayed path with selected route if we have it
+    if (chosenRoute && chosenRoute.waypoints) {
+      displayPlannedRoute({ ...order, waypoints: chosenRoute.waypoints });
+    } else {
+      displayPlannedRoute(order);
+    }
     loadOrdersQueue();
-
-    // If map is currently hidden, prompt user that they can view path
     document.getElementById('situation-text').textContent = order.situation_msg;
   } catch (err) {
-    alert("Error creating order: " + err.message);
+    alert("Error dispatching rover: " + err.message);
   }
-});
+}
 
 function displayPlannedRoute(order) {
   if (order.waypoints && order.waypoints.length > 0) {

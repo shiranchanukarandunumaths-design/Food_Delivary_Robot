@@ -16,7 +16,7 @@ from schemas import (
     OrderCreate, OrderOut, TelemetryCreate, TelemetryOut, 
     Waypoint, UserLogin, UserRegister, UserOut, QRUnlockRequest
 )
-from path_planner import find_shortest_path, compute_polyline_distance
+from path_planner import find_shortest_path, find_alternative_path, compute_polyline_distance
 
 Base.metadata.create_all(bind=engine)
 
@@ -229,6 +229,67 @@ def clear_all_roads(db: Session = Depends(get_db)):
 # ==========================================
 # 4. ORDER CREATION, ROUTE PLANNING & QR UNLOCK
 # ==========================================
+
+@app.get("/api/routes/plan")
+def plan_route(start_id: int = Query(...), target_id: int = Query(...), db: Session = Depends(get_db)):
+    """
+    Dijkstra shortest-path planning between two campus nodes.
+    Returns waypoints, total distance (m), energy estimate (Wh), and node sequence.
+    Energy model: 0.012 Wh/m (12V @ ~1A average load on flat terrain).
+    """
+    pickup = db.query(NodeModel).filter(NodeModel.id == start_id).first()
+    dest   = db.query(NodeModel).filter(NodeModel.id == target_id).first()
+    if not pickup or not dest:
+        raise HTTPException(status_code=404, detail="Invalid start or target node ID")
+
+    node_ids, waypoints, total_dist = find_shortest_path(db, start_id, target_id)
+
+    if not waypoints:
+        # Straight-line fallback when no trained roads connect these nodes
+        waypoints   = [Waypoint(lat=pickup.lat, lng=pickup.lng), Waypoint(lat=dest.lat, lng=dest.lng)]
+        total_dist  = compute_polyline_distance([w.dict() for w in waypoints])
+        node_ids    = [start_id, target_id]
+
+    energy_wh = round(total_dist * 0.012, 3)   # 0.012 Wh/m energy model
+
+    return {
+        "start_node_id":    start_id,
+        "target_node_id":   target_id,
+        "node_sequence":    node_ids,
+        "total_distance_m": round(total_dist, 2),
+        "energy_estimate_wh": energy_wh,
+        "waypoints":        [w.dict() for w in waypoints],
+    }
+
+
+@app.get("/api/routes/plan/alternative")
+def plan_alternative_route(start_id: int = Query(...), target_id: int = Query(...), db: Session = Depends(get_db)):
+    """
+    Finds a second (alternative) delivery path using an edge-exclusion strategy
+    (simplified Yen's K-Shortest Paths).  Each edge of the primary Dijkstra path is
+    temporarily excluded and Dijkstra is re-run; the best distinct result is returned.
+    """
+    pickup = db.query(NodeModel).filter(NodeModel.id == start_id).first()
+    dest   = db.query(NodeModel).filter(NodeModel.id == target_id).first()
+    if not pickup or not dest:
+        raise HTTPException(status_code=404, detail="Invalid start or target node ID")
+
+    node_ids, waypoints, total_dist = find_alternative_path(db, start_id, target_id)
+
+    if not waypoints or total_dist == float('inf'):
+        raise HTTPException(status_code=404, detail="No alternative path found — only one route exists between these nodes.")
+
+    energy_wh = round(total_dist * 0.012, 3)
+
+    return {
+        "start_node_id":    start_id,
+        "target_node_id":   target_id,
+        "node_sequence":    node_ids,
+        "total_distance_m": round(total_dist, 2),
+        "energy_estimate_wh": energy_wh,
+        "waypoints":        [w.dict() for w in waypoints],
+    }
+
 
 @app.post("/api/orders", response_model=OrderOut)
 async def create_delivery_order(order: OrderCreate, db: Session = Depends(get_db)):
