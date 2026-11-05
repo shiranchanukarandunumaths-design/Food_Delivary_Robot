@@ -45,39 +45,45 @@ def seed_campus_database():
                 db.add(u)
             db.commit()
 
-        # Seed campus nodes & edges if none exist
-        json_path = os.path.join(os.path.dirname(__file__), "..", "docs", "campus_graph.json")
-        if os.path.exists(json_path):
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        # Seed campus nodes & edges from map.osm if available, else fallback to campus_graph.json
+        osm_path = os.path.join(os.path.dirname(__file__), "map.osm")
+        if os.path.exists(osm_path):
+            print(f"Loading campus graph directly from OpenStreetMap: {osm_path}...")
+            from import_osm import import_osm_to_database
+            import_osm_to_database(osm_path)
+        else:
+            json_path = os.path.join(os.path.dirname(__file__), "..", "docs", "campus_graph.json")
+            if os.path.exists(json_path):
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
 
-            if db.query(NodeModel).count() == 0:
-                print(f"Seeding {len(data['nodes'])} baseline nodes...")
-                for n in data["nodes"]:
-                    node = NodeModel(
-                        id=n["id"],
-                        code=n["code"],
-                        name=n["name"],
-                        lat=n["lat"],
-                        lng=n["lng"],
-                        type=n["type"]
-                    )
-                    db.add(node)
-                db.commit()
+                if db.query(NodeModel).count() == 0:
+                    print(f"Seeding {len(data['nodes'])} baseline nodes...")
+                    for n in data["nodes"]:
+                        node = NodeModel(
+                            id=n["id"],
+                            code=n["code"],
+                            name=n["name"],
+                            lat=n["lat"],
+                            lng=n["lng"],
+                            type=n["type"]
+                        )
+                        db.add(node)
+                    db.commit()
 
-            if db.query(EdgeModel).count() == 0:
-                print(f"Seeding {len(data['edges'])} baseline edges...")
-                for e in data["edges"]:
-                    edge = EdgeModel(
-                        id=e["id"],
-                        from_node_id=e["from_node_id"],
-                        to_node_id=e["to_node_id"],
-                        name=e.get("name"),
-                        distance_m=e["distance_m"],
-                        waypoints_json=json.dumps(e.get("waypoints", []))
-                    )
-                    db.add(edge)
-                db.commit()
+                if db.query(EdgeModel).count() == 0:
+                    print(f"Seeding {len(data['edges'])} baseline edges...")
+                    for e in data["edges"]:
+                        edge = EdgeModel(
+                            id=e["id"],
+                            from_node_id=e["from_node_id"],
+                            to_node_id=e["to_node_id"],
+                            name=e.get("name"),
+                            distance_m=e["distance_m"],
+                            waypoints_json=json.dumps(e.get("waypoints", []))
+                        )
+                        db.add(edge)
+                    db.commit()
 
         print("Campus database seeded successfully!")
     finally:

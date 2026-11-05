@@ -226,6 +226,39 @@ def clear_all_roads(db: Session = Depends(get_db)):
     db.commit()
     return {"status": "success", "message": "All road segments cleared. Ready for fresh route training."}
 
+@app.post("/api/admin/import-osm")
+async def import_osm_endpoint(db: Session = Depends(get_db)):
+    """
+    Directly imports or re-imports OpenStreetMap data from backend/map.osm into the database.
+    Updates the campus nodes, pathways, and broadcasts network update to all connected clients.
+    """
+    import os
+    from import_osm import import_osm_to_database
+    osm_file = os.path.join(os.path.dirname(__file__), "map.osm")
+    if not os.path.exists(osm_file):
+        raise HTTPException(status_code=404, detail="map.osm file not found in backend folder")
+
+    try:
+        import_osm_to_database(osm_file)
+        node_count = db.query(NodeModel).count()
+        edge_count = db.query(EdgeModel).count()
+
+        await ws_manager.broadcast({
+            "type": "road_network_updated",
+            "message": f"Campus network refreshed directly from map.osm ({node_count} nodes, {edge_count} roads)",
+            "node_count": node_count,
+            "edge_count": edge_count
+        })
+
+        return {
+            "status": "success",
+            "message": f"Imported successfully from map.osm",
+            "nodes_loaded": node_count,
+            "edges_loaded": edge_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to import map.osm: {str(e)}")
+
 # ==========================================
 # 4. ORDER CREATION, ROUTE PLANNING & QR UNLOCK
 # ==========================================

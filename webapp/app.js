@@ -5,13 +5,14 @@
 const API_BASE = "http://127.0.0.1:8000/api";
 const WS_BASE = "ws://127.0.0.1:8000/ws/telemetry";
 
-const DEFAULT_CENTER = [6.90175, 79.86050];
-const DEFAULT_ZOOM = 19;
+const DEFAULT_CENTER = [6.90215, 79.86055];
+const DEFAULT_ZOOM = 18;
 
 let map;
 let robotMarker = null;
 let activeRoutePolyline = null;
 let edgeLines = [];
+let nodeMarkers = [];
 let nodesData = [];
 let ws = null;
 
@@ -429,14 +430,17 @@ async function loadCampus() {
 
 function renderNodes(nodes) {
   // Clear existing markers
+  nodeMarkers.forEach(m => map.removeLayer(m));
+  nodeMarkers = [];
+
   nodes.forEach(n => {
-    let color = "#38bdf8";
-    if (n.type === "pickup_point") color = "#f59e0b";
-    if (n.type === "destination") color = "#10b981";
-    if (n.type === "junction") color = "#a855f7";
+    let color = "#1976D2";
+    if (n.type === "pickup_point" || n.type === "entry_point") color = "#d97706";
+    if (n.type === "destination") color = "#059669";
+    if (n.type === "junction") color = "#8b5e3c";
 
     const marker = L.circleMarker([n.lat, n.lng], {
-      radius: 9,
+      radius: n.type === "junction" ? 5 : 8,
       fillColor: color,
       color: "#ffffff",
       weight: 2,
@@ -445,6 +449,7 @@ function renderNodes(nodes) {
     }).addTo(map);
 
     marker.bindPopup(`<strong>${n.name}</strong><br>Type: ${n.type}`);
+    nodeMarkers.push(marker);
   });
 }
 
@@ -460,23 +465,40 @@ function populateSelects(nodes) {
   if (roadEndSel) roadEndSel.innerHTML = '';
 
   nodes.forEach(n => {
-    const optP = new Option(n.name, n.id);
-    const optD = new Option(n.name, n.id);
-    pickupSel.add(optP);
+    // Pickups: entry points and canteens
+    if (n.type === "entry_point" || n.type === "pickup_point") {
+      pickupSel.add(new Option(n.name, n.id));
+    }
 
-    // Any destination or junction can be a user staying location
+    // Destinations: departments, labs, halls, library
     if (n.type === "destination" || n.type === "junction") {
-      destSel.add(optD);
+      destSel.add(new Option(n.name, n.id));
     }
 
     if (roadStartSel) roadStartSel.add(new Option(n.name, n.id));
     if (roadEndSel) roadEndSel.add(new Option(n.name, n.id));
   });
 
+  // Fallback if no specific pickups found
+  if (pickupSel.options.length === 0 && nodes.length > 0) {
+    nodes.forEach(n => pickupSel.add(new Option(n.name, n.id)));
+  }
+
   // Default: Pickup Main Gate, Destination Physics Dept
   if (nodes.length > 0) {
-    pickupSel.value = nodes[0].id;
-    if (destSel.options.length > 1) destSel.selectedIndex = 1;
+    pickupSel.selectedIndex = 0;
+    if (destSel.options.length > 1) {
+      // Find Physics if available
+      for (let i = 0; i < destSel.options.length; i++) {
+        if (destSel.options[i].text.toLowerCase().includes("physics")) {
+          destSel.selectedIndex = i;
+          break;
+        }
+      }
+      if (destSel.selectedIndex === 0 && destSel.options.length > 1) {
+        destSel.selectedIndex = 1;
+      }
+    }
   }
 }
 
@@ -978,6 +1000,21 @@ async function handleMapClick(e) {
       weight: 1,
       fillOpacity: 1
     }).addTo(map);
+  }
+}
+
+async function importOsmData() {
+  if (!confirm("Re-import campus network directly from backend/map.osm?\nThis will refresh all official buildings, canteens, and walkways.")) {
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/admin/import-osm`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Import failed");
+    alert(`Success! Loaded ${data.nodes_loaded} campus landmarks and ${data.edges_loaded} road segments directly from map.osm.`);
+    loadCampus();
+  } catch (err) {
+    alert("Error importing map.osm: " + err.message);
   }
 }
 
